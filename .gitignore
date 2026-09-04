@@ -1,0 +1,33 @@
+# Environment files (CRITICAL - Prevent credential leaks)
+.env
+.env.*
+!.env.example
+
+# Database Backups & Snapshots (CRITICAL - Prevent data leaks)
+backups/*.dump
+backups/*.sql
+backups/*.tar
+backups/*.tmp
+!backups/.gitkeep
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Operating System & IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

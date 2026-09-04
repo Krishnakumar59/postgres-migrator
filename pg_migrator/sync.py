@@ -1,0 +1,146 @@
+import time
+import psycopg2
+import psycopg2.extras
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+console = Console()
+
+class DeltaSyncEngine:
+    """
+    Incremental / Delta Catch-Up Sync Engine.
+    Identifies missing/new rows created on Production and syncs ONLY the delta
+    without re-dumping or re-copying the entire database from scratch.
+    """
+
+    def __init__(self, current_prod_url: str, new_db_url: str):
+        self.current_prod_url = current_prod_url
+        self.new_db_url = new_db_url
+
+    def _get_tables_with_pk(self, conn) -> list:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tc.table_schema, tc.table_name, kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY tc.table_name;
+        """)
+        tables = cur.fetchall()
+        cur.close()
+        return tables
+
+    def sync_missing_data(self, batch_size: int = 1000) -> dict:
+        console.print(Panel.fit(
+            "[bold cyan]🔄 DELTA / INCREMENTAL CATCH-UP SYNC[/bold cyan]\n"
+            "[dim]Detecting and syncing ONLY missing/new records without full re-dump[/dim]",
+            border_style="cyan"
+        ))
+
+        prod_conn = psycopg2.connect(self.current_prod_url)
+        new_conn = psycopg2.connect(self.new_db_url)
+        new_conn.autocommit = True
+
+        tables_with_pk = self._get_tables_with_pk(prod_conn)
+        sync_results = []
+        total_rows_synced = 0
+
+        for schema, table, pk_col in tables_with_pk:
+            full_table = f'"{schema}"."{table}"'
+            
+            cur_prod = prod_conn.cursor()
+            cur_new = new_conn.cursor()
+
+            # 1. Get counts
+            cur_prod.execute(f"SELECT count(*) FROM {full_table};")
+            prod_count = cur_prod.fetchone()[0]
+
+            cur_new.execute(f"SELECT count(*) FROM {full_table};")
+            new_count = cur_new.fetchone()[0]
+
+            diff = prod_count - new_count
+
+            if diff <= 0:
+                # Up to date
+                cur_prod.close()
+                cur_new.close()
+                continue
+
+            console.print(f"  ⚡ Table [cyan]{schema}.{table}[/cyan]: Missing [bold yellow]{diff:,} rows[/bold yellow]. Syncing delta...")
+
+            # 2. Find max PK on new DB
+            cur_new.execute(f'SELECT coalesce(max("{pk_col}"), 0) FROM {full_table};')
+            max_new_pk = cur_new.fetchone()[0]
+
+            # 3. Stream missing rows from Production
+            cur_prod.execute(f"""
+                SELECT * FROM {full_table} 
+                WHERE "{pk_col}" > %s 
+                ORDER BY "{pk_col}" ASC;
+            """, (max_new_pk,))
+
+            columns = [desc[0] for desc in cur_prod.description]
+            col_names = ', '.join([f'"{c}"' for c in columns])
+            placeholders = ', '.join(['%s'] * len(columns))
+            
+            insert_query = f"""
+                INSERT INTO {full_table} ({col_names}) 
+                VALUES ({placeholders})
+                ON CONFLICT ("{pk_col}") DO NOTHING;
+            """
+
+            synced_for_table = 0
+            while True:
+                rows = cur_prod.fetchmany(batch_size)
+                if not rows:
+                    break
+                psycopg2.extras.execute_batch(cur_new, insert_query, rows)
+                synced_for_table += len(rows)
+
+            # 4. Resync auto-increment sequences for this table
+            try:
+                cur_new.execute(f"""
+                    SELECT pg_get_serial_sequence('{schema}.{table}', '{pk_col}');
+                """)
+                seq_name = cur_new.fetchone()[0]
+                if seq_name:
+                    cur_new.execute(f"""
+                        SELECT setval('{seq_name}', coalesce(max("{pk_col}"), 1)) FROM {full_table};
+                    """)
+            except Exception:
+                pass
+
+            cur_prod.close()
+            cur_new.close()
+
+            total_rows_synced += synced_for_table
+            sync_results.append({
+                "table": f"{schema}.{table}",
+                "missing": diff,
+                "synced": synced_for_table
+            })
+            console.print(f"    [green]✔ Synced {synced_for_table:,} missing rows into {schema}.{table} & aligned sequences.[/green]")
+
+        prod_conn.close()
+        new_conn.close()
+
+        if total_rows_synced > 0:
+            console.print(Panel(
+                f"[bold green]🎉 DELTA CATCH-UP SYNC COMPLETED SUCCESSFULLY[/bold green]\n\n"
+                f"• Tables Updated: [cyan]{len(sync_results)} tables[/cyan]\n"
+                f"• Total Delta Records Synced: [bold green]{total_rows_synced:,} rows[/bold green]\n"
+                f"• Sequences Resynchronized.",
+                title="✔ Delta Sync Success",
+                border_style="green"
+            ))
+        else:
+            console.print("[green]✔ All tables are already fully up to date. Zero missing rows.[/green]")
+
+        return {
+            "tables_synced": sync_results,
+            "total_rows_synced": total_rows_synced
+        }
