@@ -5,7 +5,7 @@ import asyncio
 import json
 import statistics
 import asyncpg
-from pg_migrator.db import asyncpg_host, connect as connect_db
+from pg_migrator.db import asyncpg_kwargs, connect as connect_db
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -60,7 +60,7 @@ def get_db_info():
     print(tabulate(table_rows, headers=["Parameter", "Configured Value"], tablefmt="grid"))
     
     cur.execute("SELECT pg_database_size(current_database()) / (1024.0 * 1024.0) as size_mb;")
-    db_size = cur.fetchone()[0]
+    db_size = float(cur.fetchone()[0])
     print(f"\nCurrent Database Size: {db_size:.2f} MB")
     
     cur.execute("SELECT count(*) FROM pg_stat_activity;")
@@ -175,7 +175,7 @@ async def benchmark_bulk_ingestion(batch_sizes=[100, 1000, 5000, 10000], total_p
     print("4. BULK INGESTION THROUGHPUT & SCALING CAPACITY")
     print("=" * 60)
     
-    pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), min_size=2, max_size=4)
+    pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_kwargs(TARGET_DB_URL), min_size=2, max_size=4)
     ingestion_results = []
     
     for batch_size in batch_sizes:
@@ -292,7 +292,7 @@ async def run_concurrency_suite(concurrency_levels=[1, 2, 4, 8, 12, 16], duratio
         wl_results = []
         for c in concurrency_levels:
             try:
-                pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), min_size=c, max_size=c, command_timeout=10)
+                pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_kwargs(TARGET_DB_URL), min_size=c, max_size=c, command_timeout=10)
             except Exception as e:
                 print(f"Concurrency {c:>2} | Skipped (Could not establish pool: {e})")
                 continue
@@ -340,7 +340,7 @@ async def benchmark_complex_queries():
     print("6. COMPLEX QUERIES & INDEX PERFORMANCE BENCHMARK")
     print("=" * 60)
     
-    conn = await asyncpg.connect(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL))
+    conn = await asyncpg.connect(TARGET_DB_URL, **asyncpg_kwargs(TARGET_DB_URL))
     
     queries = [
         (
@@ -415,7 +415,7 @@ async def test_max_connections_limit():
     try:
         for i in range(1, max_tested + 1):
             try:
-                c = await asyncpg.connect(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), timeout=4)
+                c = await asyncpg.connect(TARGET_DB_URL, **asyncpg_kwargs(TARGET_DB_URL), timeout=4)
                 connections.append(c)
                 success_count += 1
                 if i % 5 == 0 or i == max_tested:

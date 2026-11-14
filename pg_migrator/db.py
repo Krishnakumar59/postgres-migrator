@@ -49,7 +49,24 @@ def connect(db_url: str, **kwargs):
     return psycopg2.connect(db_url, **kwargs)
 
 
-def asyncpg_host(db_url: str) -> dict:
-    """Extra asyncpg.connect() kwargs that route over IPv4, like psql."""
+def asyncpg_kwargs(db_url: str) -> dict:
+    """Extra asyncpg.connect() kwargs that route over IPv4, like psql.
+
+    asyncpg discards the port from the DSN when `host` is overridden, so the
+    port has to be passed along explicitly.
+    """
     hostaddr = ipv4_hostaddr(db_url)
-    return {"host": hostaddr} if hostaddr else {}
+    if not hostaddr:
+        return {}
+
+    parts = urlsplit(db_url)
+    if parts.hostname == hostaddr:
+        return {}  # already an IPv4 literal
+
+    kwargs = {"host": hostaddr}
+    try:
+        if parts.port:
+            kwargs["port"] = parts.port
+    except ValueError:
+        pass
+    return kwargs

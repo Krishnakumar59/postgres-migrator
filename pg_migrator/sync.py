@@ -1,4 +1,5 @@
 import time
+import psycopg2.extensions
 import psycopg2.extras
 from .db import connect as connect_db
 from rich.console import Console
@@ -6,6 +7,17 @@ from rich.table import Table
 from rich.panel import Panel
 
 console = Console()
+
+
+def _json_columns(description) -> set:
+    """Indexes of json/jsonb columns, which psycopg2 hands back as dict/list."""
+    json_cols = set()
+    for i, desc in enumerate(description):
+        caster = psycopg2.extensions.string_types.get(desc.type_code)
+        if caster is not None and caster.name.startswith("JSON"):
+            json_cols.add(i)
+    return json_cols
+
 
 class DeltaSyncEngine:
     """
@@ -34,6 +46,39 @@ class DeltaSyncEngine:
         cur.close()
         return tables
 
+    def _get_foreign_keys(self, conn) -> dict:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT child_ns.nspname, child.relname, parent_ns.nspname, parent.relname
+            FROM pg_constraint con
+            JOIN pg_class child ON child.oid = con.conrelid
+            JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+            JOIN pg_class parent ON parent.oid = con.confrelid
+            JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+            WHERE con.contype = 'f';
+        """)
+        deps = {}
+        for child_schema, child, parent_schema, parent in cur.fetchall():
+            deps.setdefault((child_schema, child), set()).add((parent_schema, parent))
+        cur.close()
+        return deps
+
+    def _sort_by_dependencies(self, conn, tables: list) -> list:
+        """Return tables with referenced tables first, so FK inserts don't fail."""
+        deps = self._get_foreign_keys(conn)
+        pending = {(schema, table): (schema, table, pk) for schema, table, pk in tables}
+        ordered = []
+        while pending:
+            ready = sorted(
+                name for name in pending
+                if not (deps.get(name, set()) & pending.keys())
+            )
+            if not ready:  # circular references - fall back to a stable order
+                ready = sorted(pending)
+            for name in ready:
+                ordered.append(pending.pop(name))
+        return ordered
+
     def sync_missing_data(self, batch_size: int = 1000) -> dict:
         console.print(Panel.fit(
             "[bold cyan]🔄 DELTA / INCREMENTAL CATCH-UP SYNC[/bold cyan]\n"
@@ -46,6 +91,7 @@ class DeltaSyncEngine:
         new_conn.autocommit = True
 
         tables_with_pk = self._get_tables_with_pk(prod_conn)
+        tables_with_pk = self._sort_by_dependencies(prod_conn, tables_with_pk)
         sync_results = []
         total_rows_synced = 0
 
@@ -86,6 +132,7 @@ class DeltaSyncEngine:
             columns = [desc[0] for desc in cur_prod.description]
             col_names = ', '.join([f'"{c}"' for c in columns])
             placeholders = ', '.join(['%s'] * len(columns))
+            json_cols = _json_columns(cur_prod.description)
             
             insert_query = f"""
                 INSERT INTO {full_table} ({col_names}) 
@@ -98,6 +145,16 @@ class DeltaSyncEngine:
                 rows = cur_prod.fetchmany(batch_size)
                 if not rows:
                     break
+                if json_cols:
+                    rows = [
+                        tuple(
+                            psycopg2.extras.Json(value)
+                            if i in json_cols and value is not None
+                            else value
+                            for i, value in enumerate(row)
+                        )
+                        for row in rows
+                    ]
                 psycopg2.extras.execute_batch(cur_new, insert_query, rows)
                 synced_for_table += len(rows)
 
