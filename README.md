@@ -284,14 +284,17 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
 ### Benchmark Suite CLI (`run_benchmark.py`)
 
-Deep diagnostic and stress-testing tool for any PostgreSQL instance:
+Deep diagnostic and stress-testing tool for the **new** PostgreSQL instance:
 - Discovers PostgreSQL engine configuration parameters.
 - Tests bulk ingestion write speeds with varied batch sizes.
 - Measures concurrent query latency, TPS, and percentile distributions (p50, p95, p99).
 - Generates high-resolution graphical visualizations and JSON reports.
 
+The benchmark writes real test data and drops it afterwards, so it runs against
+the new database only — never against current production.
+
 ```bash
-# Uses CURRENT_PRODUCTION_DB_URL from .env
+# Uses NEW_DATABASE_URL from .env
 python run_benchmark.py
 ```
 
@@ -390,7 +393,7 @@ print("Verification passed:", audit_summary["success"])
 
 ## 📊 PostgreSQL Benchmark Suite
 
-The toolkit includes an automated diagnostic suite for evaluating database instances before and after migration:
+The toolkit includes an automated diagnostic suite for evaluating the new database before cutover. It reads `NEW_DATABASE_URL` from `.env`:
 
 ```bash
 python run_benchmark.py

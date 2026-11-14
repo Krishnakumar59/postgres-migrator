@@ -14,16 +14,16 @@ from tabulate import tabulate
 
 load_dotenv()
 
-SOURCE_DB_URL = os.getenv("CURRENT_PRODUCTION_DB_URL")
-if not SOURCE_DB_URL:
-    print("Error: CURRENT_PRODUCTION_DB_URL environment variable not found in .env")
+TARGET_DB_URL = os.getenv("NEW_DATABASE_URL")
+if not TARGET_DB_URL:
+    print("Error: NEW_DATABASE_URL environment variable not found in .env")
     sys.exit(1)
 
 def get_db_info():
     print("=" * 60)
     print("1. DATABASE INFORMATION & CONFIGURATION DISCOVERY")
     print("=" * 60)
-    conn = connect_db(SOURCE_DB_URL)
+    conn = connect_db(TARGET_DB_URL)
     cur = conn.cursor()
     
     cur.execute("SELECT version();")
@@ -80,12 +80,12 @@ def test_connection_and_rtt(n_samples=40):
     print(f"Measuring raw TCP/SSL connection establishment time ({n_samples // 2} samples)...")
     for _ in range(n_samples // 2):
         t0 = time.perf_counter()
-        conn = connect_db(SOURCE_DB_URL)
+        conn = connect_db(TARGET_DB_URL)
         t1 = time.perf_counter()
         conn_times.append((t1 - t0) * 1000)
         conn.close()
         
-    conn = connect_db(SOURCE_DB_URL)
+    conn = connect_db(TARGET_DB_URL)
     cur = conn.cursor()
     query_times = []
     print(f"Measuring single-query RTT (SELECT 1) over established connection ({n_samples} samples)...")
@@ -121,7 +121,7 @@ def prepare_tables(scale_rows=100000):
     print("\n" + "=" * 60)
     print(f"3. PREPARING BENCHMARK SCHEMA & DATA ({scale_rows:,} rows)")
     print("=" * 60)
-    conn = connect_db(SOURCE_DB_URL)
+    conn = connect_db(TARGET_DB_URL)
     conn.autocommit = True
     cur = conn.cursor()
     
@@ -175,7 +175,7 @@ async def benchmark_bulk_ingestion(batch_sizes=[100, 1000, 5000, 10000], total_p
     print("4. BULK INGESTION THROUGHPUT & SCALING CAPACITY")
     print("=" * 60)
     
-    pool = await asyncpg.create_pool(SOURCE_DB_URL, **asyncpg_host(SOURCE_DB_URL), min_size=2, max_size=4)
+    pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), min_size=2, max_size=4)
     ingestion_results = []
     
     for batch_size in batch_sizes:
@@ -292,7 +292,7 @@ async def run_concurrency_suite(concurrency_levels=[1, 2, 4, 8, 12, 16], duratio
         wl_results = []
         for c in concurrency_levels:
             try:
-                pool = await asyncpg.create_pool(SOURCE_DB_URL, **asyncpg_host(SOURCE_DB_URL), min_size=c, max_size=c, command_timeout=10)
+                pool = await asyncpg.create_pool(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), min_size=c, max_size=c, command_timeout=10)
             except Exception as e:
                 print(f"Concurrency {c:>2} | Skipped (Could not establish pool: {e})")
                 continue
@@ -340,7 +340,7 @@ async def benchmark_complex_queries():
     print("6. COMPLEX QUERIES & INDEX PERFORMANCE BENCHMARK")
     print("=" * 60)
     
-    conn = await asyncpg.connect(SOURCE_DB_URL, **asyncpg_host(SOURCE_DB_URL))
+    conn = await asyncpg.connect(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL))
     
     queries = [
         (
@@ -415,7 +415,7 @@ async def test_max_connections_limit():
     try:
         for i in range(1, max_tested + 1):
             try:
-                c = await asyncpg.connect(SOURCE_DB_URL, **asyncpg_host(SOURCE_DB_URL), timeout=4)
+                c = await asyncpg.connect(TARGET_DB_URL, **asyncpg_host(TARGET_DB_URL), timeout=4)
                 connections.append(c)
                 success_count += 1
                 if i % 5 == 0 or i == max_tested:
@@ -492,7 +492,7 @@ def cleanup():
     print("\n" + "=" * 60)
     print("8. CLEANUP")
     print("=" * 60)
-    conn = connect_db(SOURCE_DB_URL)
+    conn = connect_db(TARGET_DB_URL)
     conn.autocommit = True
     cur = conn.cursor()
     print("Dropping benchmark tables (_benchmark_oltp, _benchmark_analytics)...")
@@ -504,6 +504,7 @@ def cleanup():
 
 async def main():
     print("STARTING COMPREHENSIVE POSTGRESQL BENCHMARK SUITE")
+    print("Target: NEW DATABASE (NEW_DATABASE_URL)")
     print("=" * 60)
     
     config_data, version, db_size = get_db_info()
