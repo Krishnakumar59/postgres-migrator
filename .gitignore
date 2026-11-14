@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Local docker stack (contains plaintext credentials)
+postgres/
+
 # Database Backups & Snapshots (CRITICAL - Prevent data leaks)
 backups/*.dump
 backups/*.sql
