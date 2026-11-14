@@ -11,9 +11,17 @@ class CompatibilityAuditor:
     between Current Production and the New Database before migration starts.
     """
 
-    def __init__(self, current_prod_url: str, new_db_url: str):
+    def __init__(
+        self,
+        current_prod_url: str,
+        new_db_url: str,
+        skip_extensions: list | None = None,
+        schemas: list | None = None,
+    ):
         self.current_prod_url = current_prod_url
         self.new_db_url = new_db_url
+        self.skip_extensions = {ext.lower() for ext in (skip_extensions or [])}
+        self.schemas = schemas
 
     def _get_extensions(self, conn) -> dict:
         cur = conn.cursor()
@@ -31,13 +39,17 @@ class CompatibilityAuditor:
 
     def _get_custom_types(self, conn) -> list:
         cur = conn.cursor()
-        cur.execute("""
+        clause, params = "", ()
+        if self.schemas:
+            clause = " AND n.nspname = ANY(%s)"
+            params = (list(self.schemas),)
+        cur.execute(f"""
             SELECT n.nspname, t.typname, t.typtype 
             FROM pg_type t 
             JOIN pg_namespace n ON n.oid = t.typnamespace 
             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-              AND t.typtype IN ('e', 'c');
-        """)
+              AND t.typtype IN ('e', 'c'){clause};
+        """, params)
         types = cur.fetchall()
         cur.close()
         return types
@@ -63,6 +75,10 @@ class CompatibilityAuditor:
         cur_new = new_conn.cursor()
 
         for ext, ver in prod_exts.items():
+            if ext.lower() in self.skip_extensions:
+                ext_table.add_row(ext, ver, "[yellow]Skipped[/yellow]", f"Skipped (--skip-extensions {ext})")
+                continue
+
             if ext in new_installed_exts:
                 status = "[green]Already Installed ✔[/green]"
                 action = "None needed"

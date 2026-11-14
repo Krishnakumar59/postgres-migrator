@@ -12,19 +12,26 @@ class PostgresVerifier:
     cryptographic row fingerprints, and auto-increment sequence alignment.
     """
 
-    def __init__(self, current_prod_url: str, new_db_url: str):
+    def __init__(self, current_prod_url: str, new_db_url: str, schemas: list | None = None):
         self.current_prod_url = current_prod_url
         self.new_db_url = new_db_url
+        self.schemas = schemas
+
+    def _schema_clause(self, column: str) -> tuple[str, tuple]:
+        if not self.schemas:
+            return "", ()
+        return f" AND {column} = ANY(%s)", (list(self.schemas),)
 
     def _get_tables(self, conn) -> list:
         cur = conn.cursor()
-        cur.execute("""
+        clause, params = self._schema_clause("table_schema")
+        cur.execute(f"""
             SELECT table_schema, table_name 
             FROM information_schema.tables 
             WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-              AND table_type = 'BASE TABLE'
+              AND table_type = 'BASE TABLE'{clause}
             ORDER BY table_name;
-        """)
+        """, params)
         tables = cur.fetchall()
         cur.close()
         return tables
@@ -38,6 +45,7 @@ class PostgresVerifier:
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
               AND tc.table_schema = kcu.table_schema
+              AND tc.table_name = kcu.table_name
             WHERE tc.constraint_type = 'PRIMARY KEY'
               AND tc.table_schema = %s
               AND tc.table_name = %s
@@ -60,8 +68,8 @@ class PostgresVerifier:
 
         if pk_col and count > 0:
             try:
-                # 2. Primary Key Boundary Check
-                cur.execute(f'SELECT min("{pk_col}"), max("{pk_col}") FROM "{schema}"."{table}";')
+                # 2. Primary Key Boundary Check (uuid has no min/max aggregate)
+                cur.execute(f'SELECT min("{pk_col}"::text), max("{pk_col}"::text) FROM "{schema}"."{table}";')
                 pk_min, pk_max = cur.fetchone()
 
                 # 3. Cryptographic Fingerprint of Primary Key Set (up to 50k rows sample)
@@ -73,7 +81,7 @@ class PostgresVerifier:
                 """)
                 fingerprint = cur.fetchone()[0]
             except Exception:
-                pass
+                conn.rollback()
 
         cur.close()
         return {
@@ -85,11 +93,12 @@ class PostgresVerifier:
 
     def _get_sequences(self, conn) -> list:
         cur = conn.cursor()
-        cur.execute("""
+        clause, params = self._schema_clause("sequence_schema")
+        cur.execute(f"""
             SELECT sequence_schema, sequence_name 
             FROM information_schema.sequences
-            WHERE sequence_schema NOT IN ('pg_catalog', 'information_schema');
-        """)
+            WHERE sequence_schema NOT IN ('pg_catalog', 'information_schema'){clause};
+        """, params)
         seqs = cur.fetchall()
         cur.close()
         return seqs
@@ -100,6 +109,7 @@ class PostgresVerifier:
             cur.execute(f'SELECT last_value FROM "{schema}"."{seq}";')
             val = cur.fetchone()[0]
         except Exception:
+            conn.rollback()
             val = None
         cur.close()
         return val

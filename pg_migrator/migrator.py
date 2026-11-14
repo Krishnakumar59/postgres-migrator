@@ -26,12 +26,27 @@ class DatabaseMigrator:
     and skips unnecessary re-migration.
     """
 
-    def __init__(self, current_production_db_url: str, new_database_url: str, backup_dir: str = "./backups"):
+    def __init__(
+        self,
+        current_production_db_url: str,
+        new_database_url: str,
+        backup_dir: str = "./backups",
+        schemas: list | None = None,
+        skip_extensions: list | None = None,
+    ):
         self.current_production_db_url = current_production_db_url
         self.new_database_url = new_database_url
         self.backup_dir = Path(backup_dir)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.schemas = schemas or None
+        self.skip_extensions = skip_extensions or []
         self.notifier = MigrationNotifier()
+
+    def _schema_clause(self, column: str = "table_schema") -> tuple[str, tuple]:
+        """SQL fragment + params restricting a catalog query to self.schemas."""
+        if not self.schemas:
+            return "", ()
+        return f" AND {column} = ANY(%s)", (list(self.schemas),)
 
     def _sanitize_url(self, url: str) -> str:
         try:
@@ -70,10 +85,11 @@ class DatabaseMigrator:
             prod_ver = cur_prod.fetchone()[0].split()[1]
             cur_prod.execute("SELECT current_database(), current_user;")
             prod_db, prod_user = cur_prod.fetchone()
-            cur_prod.execute("""
+            clause, params = self._schema_clause()
+            cur_prod.execute(f"""
                 SELECT count(*) FROM information_schema.tables 
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'BASE TABLE';
-            """)
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'BASE TABLE'{clause};
+            """, params)
             prod_tables = cur_prod.fetchone()[0]
             cur_prod.close()
             conn_prod.close()
@@ -90,10 +106,11 @@ class DatabaseMigrator:
             new_ver = cur_new.fetchone()[0].split()[1]
             cur_new.execute("SELECT current_database(), current_user;")
             new_db, new_user = cur_new.fetchone()
-            cur_new.execute("""
+            clause, params = self._schema_clause()
+            cur_new.execute(f"""
                 SELECT count(*) FROM information_schema.tables 
-                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'BASE TABLE';
-            """)
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_type = 'BASE TABLE'{clause};
+            """, params)
             new_tables = cur_new.fetchone()[0]
             cur_new.close()
             conn_new.close()
@@ -145,6 +162,9 @@ class DatabaseMigrator:
             "--no-privileges",
             "--file", temp_backup_file
         ]
+
+        for schema in self.schemas or []:
+            cmd += ["--schema", schema]
         
         try:
             subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -209,6 +229,15 @@ class DatabaseMigrator:
             proc = subprocess.run(cmd, capture_output=True, text=True)
             t1 = time.perf_counter()
             if proc.returncode in (0, 1):
+                if proc.returncode == 1 and proc.stderr.strip():
+                    warnings = list(dict.fromkeys(
+                        line.strip() for line in proc.stderr.splitlines() if line.strip()
+                    ))
+                    console.print("[bold yellow]⚠️ pg_restore reported non-fatal warnings:[/bold yellow]")
+                    for line in warnings[:10]:
+                        console.print(f"    [yellow]{line}[/yellow]")
+                    if len(warnings) > 10:
+                        console.print(f"    [yellow]... (+{len(warnings) - 10} more)[/yellow]")
                 console.print(f"[bold green]✔ Restoration onto New Database completed in {t1 - t0:.2f}s![/bold green]")
                 return True
             else:
@@ -235,13 +264,18 @@ class DatabaseMigrator:
 
         # If already populated and synced
         if new_tables > 0:
-            verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url)
+            verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url, schemas=self.schemas)
             audit = verifier.verify_migration()
             if audit["success"]:
                 console.print("[bold green]✔ Pre-Flight Check: Both databases are ALREADY 100% synchronized![/bold green]")
                 return True
 
-        auditor = CompatibilityAuditor(self.current_production_db_url, self.new_database_url)
+        auditor = CompatibilityAuditor(
+            self.current_production_db_url,
+            self.new_database_url,
+            skip_extensions=self.skip_extensions,
+            schemas=self.schemas,
+        )
         compat = auditor.audit_and_prepare(auto_enable_extensions=False)
 
         cleaner = PostgresCleaner(self.new_database_url)
@@ -282,7 +316,7 @@ class DatabaseMigrator:
         # =========================================================================
         if new_tables > 0 and prod_tables > 0:
             console.print("\n[bold yellow]🔍 New database already contains tables. Checking existing synchronization status...[/bold yellow]")
-            verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url)
+            verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url, schemas=self.schemas)
             audit = verifier.verify_migration()
 
             if audit["success"]:
@@ -302,7 +336,7 @@ class DatabaseMigrator:
 
             # If not 100% synced, offer/run Delta Sync automatically
             console.print("[bold yellow]⚡ Data difference detected! Automatically performing Delta Catch-Up Sync...[/bold yellow]")
-            sync_engine = DeltaSyncEngine(self.current_production_db_url, self.new_database_url)
+            sync_engine = DeltaSyncEngine(self.current_production_db_url, self.new_database_url, schemas=self.schemas)
             sync_res = sync_engine.sync_missing_data()
 
             # Re-verify after delta sync
@@ -320,12 +354,7 @@ class DatabaseMigrator:
                     PerformanceComparator(self.current_production_db_url, self.new_database_url).compare()
                 return {"success": True, "delta_synced": True, "audit": re_audit}
 
-        # 3. Extension & Compatibility Audit
-        auditor = CompatibilityAuditor(self.current_production_db_url, self.new_database_url)
-        if not auditor.audit_and_prepare(auto_enable_extensions=True):
-            return {"success": False, "error": "Extension incompatibility."}
-
-        # 4. STEP 1: CREATE & VERIFY ATOMIC DUAL BACKUPS FIRST
+        # 3. STEP 1: CREATE & VERIFY ATOMIC DUAL BACKUPS FIRST
         try:
             prod_backup, new_db_backup = self.create_dual_preflight_backups(
                 prod_tables=prod_tables,
@@ -335,7 +364,7 @@ class DatabaseMigrator:
             console.print(f"[bold red]⛔ MIGRATION HALTED: Pre-flight backup failed verification: {e}[/bold red]")
             return {"success": False, "error": str(e)}
 
-        # 5. STEP 2: HARD-BLOCK CHECK - New database MUST be empty for fresh initial restore
+        # 4. STEP 2: HARD-BLOCK CHECK - New database MUST be empty for fresh initial restore
         cleaner = PostgresCleaner(self.new_database_url)
         if not cleaner.verify_target_is_empty_or_clean():
             return {
@@ -343,13 +372,25 @@ class DatabaseMigrator:
                 "error": f"New database contains {new_tables} tables. Execution halted to protect data."
             }
 
+        # 5. Extension & Compatibility Audit
+        # Runs AFTER the target schema is reset, because dropping schema public
+        # CASCADE would also drop any extension installed into it.
+        auditor = CompatibilityAuditor(
+            self.current_production_db_url,
+            self.new_database_url,
+            skip_extensions=self.skip_extensions,
+            schemas=self.schemas,
+        )
+        if not auditor.audit_and_prepare(auto_enable_extensions=True):
+            return {"success": False, "error": "Extension incompatibility."}
+
         # 6. STEP 3: RESTORE PRODUCTION BACKUP ONTO NEW DATABASE
         ok = self.restore_backup(prod_backup, parallel_jobs=parallel_jobs)
         if not ok:
             return {"success": False, "error": "Restoration process failed."}
 
         # 7. STEP 4: AUDIT & INTEGRITY VERIFICATION
-        verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url)
+        verifier = PostgresVerifier(self.current_production_db_url, self.new_database_url, schemas=self.schemas)
         audit_result = verifier.verify_migration()
 
         # 8. STEP 5: OPTIONAL PERFORMANCE COMPARISON
@@ -364,8 +405,10 @@ class DatabaseMigrator:
                 f"• Dual verified backups saved in [cyan]./backups/[/cyan]\n"
                 f"• All {audit_result['total_tables']} tables copied and verified.\n"
                 f"• {audit_result['total_target_rows']:,} rows transferred with zero errors.\n"
-                f"• Cutover: set [cyan]CURRENT_PRODUCTION_DB_URL[/cyan] in .env to "
+                f"• Cutover: point the application's own database URL at "
                 f"[cyan]{self._sanitize_url(self.new_database_url)}[/cyan].\n"
+                f"• Keep CURRENT_PRODUCTION_DB_URL on the source so you can run\n"
+                f"  [cyan]--sync-missing[/cyan] and [cyan]--verify-only[/cyan] during the switchover.\n"
                 f"• Ready for production cutover.",
                 title="Cutover Ready",
                 border_style="green"

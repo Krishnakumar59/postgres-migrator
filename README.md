@@ -239,6 +239,12 @@ CURRENT_PRODUCTION_DB_URL=postgres://user:password@live-prod-db.example.com:5432
 # Target database (DESTINATION)
 NEW_DATABASE_URL=postgres://user:password@new-provider-db.example.com:5432/new_db?sslmode=require
 
+# Optional: limit the migration to specific schemas (default: every schema)
+# MIGRATION_SCHEMAS=public,alembic
+
+# Optional: ignore extensions that only exist on the source provider (default: none)
+# MIGRATION_SKIP_EXTENSIONS=supabase_vault
+
 # Optional Multi-Channel Alerts
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
@@ -266,7 +272,44 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 | `python migrate.py --verify-only` | Verifies data parity (row counts, sequences, MD5 fingerprints) only. |
 | `python migrate.py --test-notification` | Sends test alerts across Discord, Slack, Telegram, and Desktop notifications. |
 | `python migrate.py --jobs 8` | Configures parallel worker threads for `pg_restore` (default: 4). |
+| `python migrate.py --schemas public,alembic` | Limits the dump/restore/verify to the given schemas (env: `MIGRATION_SCHEMAS`). |
+| `python migrate.py --skip-extensions supabase_vault` | Ignores source-only extensions during the compatibility audit (env: `MIGRATION_SKIP_EXTENSIONS`). |
 | `python migrate.py -p <url> -n <url>` | Pass source (`--current-prod`) and target (`--new-db`) URLs via CLI flags. |
+
+---
+
+### Migrating from Supabase (or another managed provider)
+
+Managed providers keep their own schemas in the same database (`auth`, `storage`, `realtime`, `vault`)
+and ship extensions that cannot be installed elsewhere (`supabase_vault`). If your application only
+lives in `public` (plus `alembic` for migrations), restrict the migration instead of copying the
+provider's internals:
+
+```bash
+MIGRATION_SCHEMAS=public,alembic
+MIGRATION_SKIP_EXTENSIONS=supabase_vault
+```
+
+Before doing this, confirm nothing in `public` reaches into those schemas:
+
+```sql
+-- Foreign keys pointing outside public (should return 0 rows)
+SELECT con.conname
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE con.contype = 'f' AND n.nspname = 'public' AND confrelid::regclass::text NOT LIKE 'public.%';
+
+-- Functions or RLS policies referencing provider schemas (should return 0 rows)
+SELECT p.oid::regprocedure FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public' AND p.prosrc ~* '(auth|storage|vault|realtime)\.';
+```
+
+> [!IMPORTANT]
+> The compatibility audit runs **after** the target schema is reset. Dropping `public` with `CASCADE`
+> also drops extensions installed into it, so `btree_gist`, `pgcrypto`, `uuid-ossp`, and friends must
+> be re-enabled afterwards — the pipeline does this automatically.
 
 ---
 
@@ -327,9 +370,18 @@ Generated benchmark output artifacts:
      $ python migrate.py --verify-only
 
  [4] Switch Application Configuration & Go Live
-     - Set CURRENT_PRODUCTION_DB_URL in .env to the new database URL
-     - Restart application services
-     - Verify application traffic on new provider 🎉
+     - Freeze writes on the old provider (or put the app in maintenance mode)
+     - Point the application's own database URL at the new instance
+       (PgBouncer in front of Postgres: 127.0.0.1:5432)
+     - Restart application services and verify real traffic 🎉
+     - Do NOT overwrite CURRENT_PRODUCTION_DB_URL — it stays pointed at the
+       old provider so you can re-run --sync-missing / --verify-only if needed
+
+ [5] Decommission the Old Provider (after a soak period)
+     - Keep the old database read-only for N days as a rollback target
+     - Re-run the final delta sync + verification once more before shutting it down
+     - Shut the old provider down only after the new instance has served real
+       traffic without incident
 ```
 
 ---

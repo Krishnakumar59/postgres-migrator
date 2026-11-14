@@ -26,22 +26,36 @@ class DeltaSyncEngine:
     without re-dumping or re-copying the entire database from scratch.
     """
 
-    def __init__(self, current_prod_url: str, new_db_url: str):
+    def __init__(self, current_prod_url: str, new_db_url: str, schemas: list | None = None):
         self.current_prod_url = current_prod_url
         self.new_db_url = new_db_url
+        self.schemas = schemas
 
     def _get_tables_with_pk(self, conn) -> list:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT tc.table_schema, tc.table_name, kcu.column_name
+        clause = ""
+        params = ()
+        if self.schemas:
+            clause = " AND tc.table_schema = ANY(%s)"
+            params = (list(self.schemas),)
+        cur.execute(f"""
+            SELECT tc.table_schema, tc.table_name,
+                   array_agg(kcu.column_name ORDER BY kcu.ordinal_position),
+                   array_agg(c.data_type ORDER BY kcu.ordinal_position)
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
               AND tc.table_schema = kcu.table_schema
+              AND tc.table_name = kcu.table_name
+            JOIN information_schema.columns c
+              ON c.table_schema = kcu.table_schema
+              AND c.table_name = kcu.table_name
+              AND c.column_name = kcu.column_name
             WHERE tc.constraint_type = 'PRIMARY KEY'
-              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+              AND tc.table_schema NOT IN ('pg_catalog', 'information_schema'){clause}
+            GROUP BY tc.table_schema, tc.table_name
             ORDER BY tc.table_name;
-        """)
+        """, params)
         tables = cur.fetchall()
         cur.close()
         return tables
@@ -66,7 +80,7 @@ class DeltaSyncEngine:
     def _sort_by_dependencies(self, conn, tables: list) -> list:
         """Return tables with referenced tables first, so FK inserts don't fail."""
         deps = self._get_foreign_keys(conn)
-        pending = {(schema, table): (schema, table, pk) for schema, table, pk in tables}
+        pending = {(row[0], row[1]): row for row in tables}
         ordered = []
         while pending:
             ready = sorted(
@@ -95,8 +109,18 @@ class DeltaSyncEngine:
         sync_results = []
         total_rows_synced = 0
 
-        for schema, table, pk_col in tables_with_pk:
+        for schema, table, pk_cols, pk_types in tables_with_pk:
             full_table = f'"{schema}"."{table}"'
+            pks = list(pk_cols)
+            pk_col = pks[0] if len(pks) == 1 else None
+            # Only a single numeric key can use the "everything above the max" fast path.
+            numeric_pk = (
+                pk_col is not None
+                and pk_types[0] in (
+                    "smallint", "integer", "bigint", "numeric", "decimal",
+                    "real", "double precision",
+                )
+            )
             
             cur_prod = prod_conn.cursor()
             cur_new = new_conn.cursor()
@@ -118,16 +142,21 @@ class DeltaSyncEngine:
 
             console.print(f"  ⚡ Table [cyan]{schema}.{table}[/cyan]: Missing [bold yellow]{diff:,} rows[/bold yellow]. Syncing delta...")
 
-            # 2. Find max PK on new DB
-            cur_new.execute(f'SELECT coalesce(max("{pk_col}"), 0) FROM {full_table};')
-            max_new_pk = cur_new.fetchone()[0]
-
-            # 3. Stream missing rows from Production
-            cur_prod.execute(f"""
-                SELECT * FROM {full_table} 
-                WHERE "{pk_col}" > %s 
-                ORDER BY "{pk_col}" ASC;
-            """, (max_new_pk,))
+            if numeric_pk:
+                # 2a. Fast path: stream rows above the newest key already present
+                cur_new.execute(f'SELECT coalesce(max("{pk_col}"), 0) FROM {full_table};')
+                max_new_pk = cur_new.fetchone()[0]
+                cur_prod.execute(f"""
+                    SELECT * FROM {full_table} 
+                    WHERE "{pk_col}" > %s 
+                    ORDER BY "{pk_col}" ASC;
+                """, (max_new_pk,))
+                conflict = f'ON CONFLICT ("{pk_col}") DO NOTHING'
+            else:
+                # 2b. UUID / text / composite keys are not monotonic. Stream the
+                # table and let the primary key skip rows that already exist.
+                cur_prod.execute(f"SELECT * FROM {full_table};")
+                conflict = "ON CONFLICT DO NOTHING"
 
             columns = [desc[0] for desc in cur_prod.description]
             col_names = ', '.join([f'"{c}"' for c in columns])
@@ -137,10 +166,9 @@ class DeltaSyncEngine:
             insert_query = f"""
                 INSERT INTO {full_table} ({col_names}) 
                 VALUES ({placeholders})
-                ON CONFLICT ("{pk_col}") DO NOTHING;
+                {conflict};
             """
 
-            synced_for_table = 0
             while True:
                 rows = cur_prod.fetchmany(batch_size)
                 if not rows:
@@ -156,20 +184,24 @@ class DeltaSyncEngine:
                         for row in rows
                     ]
                 psycopg2.extras.execute_batch(cur_new, insert_query, rows)
-                synced_for_table += len(rows)
+
+            # 3. Count what actually landed (ON CONFLICT may have skipped rows)
+            cur_new.execute(f"SELECT count(*) FROM {full_table};")
+            synced_for_table = cur_new.fetchone()[0] - new_count
 
             # 4. Resync auto-increment sequences for this table
-            try:
-                cur_new.execute(f"""
-                    SELECT pg_get_serial_sequence('{schema}.{table}', '{pk_col}');
-                """)
-                seq_name = cur_new.fetchone()[0]
-                if seq_name:
+            if numeric_pk:
+                try:
                     cur_new.execute(f"""
-                        SELECT setval('{seq_name}', coalesce(max("{pk_col}"), 1)) FROM {full_table};
+                        SELECT pg_get_serial_sequence('{schema}.{table}', '{pk_col}');
                     """)
-            except Exception:
-                pass
+                    seq_name = cur_new.fetchone()[0]
+                    if seq_name:
+                        cur_new.execute(f"""
+                            SELECT setval('{seq_name}', coalesce(max("{pk_col}"), 1)) FROM {full_table};
+                        """)
+                except Exception:
+                    pass
 
             cur_prod.close()
             cur_new.close()

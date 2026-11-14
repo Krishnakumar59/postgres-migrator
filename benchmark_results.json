@@ -1,17 +1,289 @@
 {
-  "version": "PostgreSQL 18.6 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 15.2.1 20260123 (Red Hat 15.2.1-7), 64-bit",
+  "version": "PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
   "config": {
-    "max_connections": "20",
-    "shared_buffers": "190MB",
-    "effective_cache_size": "569MB",
-    "maintenance_work_mem": "89MB",
-    "work_mem": "2MB",
-    "wal_buffers": "6080kB",
+    "max_connections": "100",
+    "shared_buffers": "1GB",
+    "effective_cache_size": "2560MB",
+    "maintenance_work_mem": "256MB",
+    "work_mem": "4MB",
+    "wal_buffers": "16MB",
     "checkpoint_completion_target": "0.9",
     "max_parallel_workers": "8",
     "max_parallel_workers_per_gather": "2",
-    "random_page_cost": "1",
-    "effective_io_concurrency": "2",
-    "synchronous_commit": "off"
+    "random_page_cost": "1.1",
+    "effective_io_concurrency": "200",
+    "synchronous_commit": "on"
   },
-  "initial_db_size_mb": 
+  "initial_db_size_mb": 119.15397930145264,
+  "rtt_stats": {
+    "conn_mean_ms": 11.336513700371142,
+    "conn_p50_ms": 10.266762496030424,
+    "conn_p95_ms": 18.258928001159802,
+    "rtt_mean_ms": 0.11510332551551983,
+    "rtt_p50_ms": 0.10180449316976592,
+    "rtt_p95_ms": 0.1283650053665042,
+    "rtt_p99_ms": 0.4918389895465225,
+    "rtt_min_ms": 0.09212600707542151,
+    "rtt_max_ms": 0.4918389895465225
+  },
+  "ingestion_results": [
+    {
+      "method": "Multi-Row Batch (100/batch)",
+      "batch_size": 100,
+      "total_rows": 50000,
+      "elapsed_s": 1.64,
+      "rows_per_sec": 30458.6,
+      "est_mb_per_sec": 7.26
+    },
+    {
+      "method": "Multi-Row Batch (1,000/batch)",
+      "batch_size": 1000,
+      "total_rows": 50000,
+      "elapsed_s": 1.55,
+      "rows_per_sec": 32162.2,
+      "est_mb_per_sec": 7.67
+    },
+    {
+      "method": "Multi-Row Batch (5,000/batch)",
+      "batch_size": 5000,
+      "total_rows": 50000,
+      "elapsed_s": 1.96,
+      "rows_per_sec": 25494.8,
+      "est_mb_per_sec": 6.08
+    },
+    {
+      "method": "Multi-Row Batch (10,000/batch)",
+      "batch_size": 10000,
+      "total_rows": 50000,
+      "elapsed_s": 1.86,
+      "rows_per_sec": 26848.2,
+      "est_mb_per_sec": 6.4
+    },
+    {
+      "method": "Fast Binary COPY (100k rows)",
+      "batch_size": 100000,
+      "total_rows": 100000,
+      "elapsed_s": 1.02,
+      "rows_per_sec": 98354.1,
+      "est_mb_per_sec": 23.45
+    }
+  ],
+  "concurrency_results": {
+    "read_only": [
+      {
+        "concurrency": 1,
+        "tps": 1949.0,
+        "total_tx": 11694,
+        "mean_ms": 0.51,
+        "p50_ms": 0.43,
+        "p95_ms": 1.05,
+        "p99_ms": 1.4
+      },
+      {
+        "concurrency": 2,
+        "tps": 4276.5,
+        "total_tx": 25659,
+        "mean_ms": 0.47,
+        "p50_ms": 0.43,
+        "p95_ms": 0.72,
+        "p99_ms": 1.11
+      },
+      {
+        "concurrency": 4,
+        "tps": 6105.3,
+        "total_tx": 36632,
+        "mean_ms": 0.65,
+        "p50_ms": 0.62,
+        "p95_ms": 0.92,
+        "p99_ms": 1.35
+      },
+      {
+        "concurrency": 8,
+        "tps": 6246.8,
+        "total_tx": 37481,
+        "mean_ms": 1.28,
+        "p50_ms": 1.22,
+        "p95_ms": 1.73,
+        "p99_ms": 2.29
+      },
+      {
+        "concurrency": 12,
+        "tps": 6382.5,
+        "total_tx": 38295,
+        "mean_ms": 1.88,
+        "p50_ms": 1.79,
+        "p95_ms": 2.59,
+        "p99_ms": 3.27
+      },
+      {
+        "concurrency": 16,
+        "tps": 6332.7,
+        "total_tx": 37996,
+        "mean_ms": 2.52,
+        "p50_ms": 2.41,
+        "p95_ms": 3.5,
+        "p99_ms": 4.42
+      }
+    ],
+    "write_only": [
+      {
+        "concurrency": 1,
+        "tps": 1004.8,
+        "total_tx": 6029,
+        "mean_ms": 0.99,
+        "p50_ms": 0.92,
+        "p95_ms": 1.75,
+        "p99_ms": 2.29
+      },
+      {
+        "concurrency": 2,
+        "tps": 2285.7,
+        "total_tx": 13714,
+        "mean_ms": 0.87,
+        "p50_ms": 0.87,
+        "p95_ms": 1.4,
+        "p99_ms": 1.88
+      },
+      {
+        "concurrency": 4,
+        "tps": 3887.3,
+        "total_tx": 23324,
+        "mean_ms": 1.03,
+        "p50_ms": 1.03,
+        "p95_ms": 1.58,
+        "p99_ms": 2.12
+      },
+      {
+        "concurrency": 8,
+        "tps": 4853.3,
+        "total_tx": 29120,
+        "mean_ms": 1.65,
+        "p50_ms": 1.62,
+        "p95_ms": 2.38,
+        "p99_ms": 3.11
+      },
+      {
+        "concurrency": 12,
+        "tps": 5192.7,
+        "total_tx": 31156,
+        "mean_ms": 2.31,
+        "p50_ms": 2.27,
+        "p95_ms": 3.21,
+        "p99_ms": 4.02
+      },
+      {
+        "concurrency": 16,
+        "tps": 5082.3,
+        "total_tx": 30494,
+        "mean_ms": 3.15,
+        "p50_ms": 3.05,
+        "p95_ms": 4.37,
+        "p99_ms": 5.54
+      }
+    ],
+    "mixed_oltp": [
+      {
+        "concurrency": 1,
+        "tps": 627.3,
+        "total_tx": 3764,
+        "mean_ms": 1.59,
+        "p50_ms": 1.39,
+        "p95_ms": 2.77,
+        "p99_ms": 3.49
+      },
+      {
+        "concurrency": 2,
+        "tps": 1246.2,
+        "total_tx": 7477,
+        "mean_ms": 1.6,
+        "p50_ms": 1.48,
+        "p95_ms": 2.37,
+        "p99_ms": 3.02
+      },
+      {
+        "concurrency": 4,
+        "tps": 2134.2,
+        "total_tx": 12805,
+        "mean_ms": 1.87,
+        "p50_ms": 1.78,
+        "p95_ms": 2.55,
+        "p99_ms": 3.23
+      },
+      {
+        "concurrency": 8,
+        "tps": 2515.7,
+        "total_tx": 15094,
+        "mean_ms": 3.18,
+        "p50_ms": 3.03,
+        "p95_ms": 4.37,
+        "p99_ms": 5.55
+      },
+      {
+        "concurrency": 12,
+        "tps": 2575.5,
+        "total_tx": 15453,
+        "mean_ms": 4.66,
+        "p50_ms": 4.46,
+        "p95_ms": 6.32,
+        "p99_ms": 8.24
+      },
+      {
+        "concurrency": 16,
+        "tps": 2462.5,
+        "total_tx": 14775,
+        "mean_ms": 6.5,
+        "p50_ms": 6.15,
+        "p95_ms": 8.91,
+        "p99_ms": 11.89
+      }
+    ]
+  },
+  "query_bench": [
+    {
+      "name": "Point Index Scan (B-Tree)",
+      "mean_ms": 0.55,
+      "p50_ms": 0.28,
+      "min_ms": 0.16,
+      "max_ms": 3.1
+    },
+    {
+      "name": "Aggregation & Grouping (150k+ rows)",
+      "mean_ms": 39.01,
+      "p50_ms": 37.83,
+      "min_ms": 36.59,
+      "max_ms": 43.41
+    },
+    {
+      "name": "JSONB GIN Index Query (Metadata filter)",
+      "mean_ms": 41.89,
+      "p50_ms": 41.5,
+      "min_ms": 40.79,
+      "max_ms": 45.06
+    },
+    {
+      "name": "JSONB Top-K Search with Sorting",
+      "mean_ms": 29.35,
+      "p50_ms": 29.06,
+      "min_ms": 27.98,
+      "max_ms": 31.39
+    },
+    {
+      "name": "Relational JOIN (OLTP x Analytics)",
+      "mean_ms": 108.42,
+      "p50_ms": 108.06,
+      "min_ms": 102.3,
+      "max_ms": 113.37
+    },
+    {
+      "name": "Full Table Scan (Sequential scan + Agg)",
+      "mean_ms": 24.71,
+      "p50_ms": 24.66,
+      "min_ms": 23.45,
+      "max_ms": 25.86
+    }
+  ],
+  "max_conn_sustained": {
+    "max_sustained": 30,
+    "failure_reason": null
+  }
+}

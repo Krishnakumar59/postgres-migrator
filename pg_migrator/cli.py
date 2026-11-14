@@ -15,6 +15,11 @@ from .notifier import MigrationNotifier
 load_dotenv()
 console = Console()
 
+
+def _split_list(value: str) -> list:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Enterprise Safe PostgreSQL Migration & Cutover Tool",
@@ -38,6 +43,22 @@ def main():
         action="store_true",
         dest="delta_sync",
         help="Incremental Catch-Up: Only sync missing/new rows without re-dumping the whole database"
+    )
+
+    parser.add_argument(
+        "--schemas",
+        type=_split_list,
+        default=os.getenv("MIGRATION_SCHEMAS"),
+        metavar="public,alembic",
+        help="Comma-separated schemas to migrate (default: every schema)"
+    )
+
+    parser.add_argument(
+        "--skip-extensions",
+        type=_split_list,
+        default=os.getenv("MIGRATION_SKIP_EXTENSIONS"),
+        metavar="supabase_vault",
+        help="Comma-separated provider-only extensions to ignore during the audit"
     )
 
     parser.add_argument(
@@ -109,16 +130,21 @@ def main():
 
     # 2. Delta Catch-Up Sync Mode
     if args.delta_sync:
-        sync_engine = DeltaSyncEngine(args.current_prod, args.new_db)
+        sync_engine = DeltaSyncEngine(args.current_prod, args.new_db, schemas=args.schemas)
         sync_engine.sync_missing_data()
         
-        verifier = PostgresVerifier(args.current_prod, args.new_db)
+        verifier = PostgresVerifier(args.current_prod, args.new_db, schemas=args.schemas)
         res = verifier.verify_migration()
         sys.exit(0 if res["success"] else 1)
 
     # 3. Compatibility Audit Only
     if args.audit_compatibility:
-        auditor = CompatibilityAuditor(args.current_prod, args.new_db)
+        auditor = CompatibilityAuditor(
+            args.current_prod,
+            args.new_db,
+            skip_extensions=args.skip_extensions,
+            schemas=args.schemas,
+        )
         ok = auditor.audit_and_prepare()
         sys.exit(0 if ok else 1)
 
@@ -130,11 +156,16 @@ def main():
 
     # 5. Verify Only
     if args.verify_only:
-        verifier = PostgresVerifier(args.current_prod, args.new_db)
+        verifier = PostgresVerifier(args.current_prod, args.new_db, schemas=args.schemas)
         res = verifier.verify_migration()
         sys.exit(0 if res["success"] else 1)
 
-    migrator = DatabaseMigrator(args.current_prod, args.new_db)
+    migrator = DatabaseMigrator(
+        args.current_prod,
+        args.new_db,
+        schemas=args.schemas,
+        skip_extensions=args.skip_extensions,
+    )
 
     # 6. Dry Run Mode
     if args.dry_run:
