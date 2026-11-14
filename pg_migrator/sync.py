@@ -1,6 +1,6 @@
 import time
-import psycopg2
 import psycopg2.extras
+from .db import connect as connect_db
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -41,8 +41,8 @@ class DeltaSyncEngine:
             border_style="cyan"
         ))
 
-        prod_conn = psycopg2.connect(self.current_prod_url)
-        new_conn = psycopg2.connect(self.new_db_url)
+        prod_conn = connect_db(self.current_prod_url)
+        new_conn = connect_db(self.new_db_url)
         new_conn.autocommit = True
 
         tables_with_pk = self._get_tables_with_pk(prod_conn)

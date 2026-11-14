@@ -2,8 +2,8 @@ import os
 import sys
 import time
 import subprocess
-import psycopg2
 from pathlib import Path
+from .db import connect as connect_db
 from urllib.parse import urlparse
 from rich.console import Console
 from rich.panel import Panel
@@ -118,7 +118,7 @@ class EmergencyRollback:
 
         console.print("\n[bold yellow]🧹 Resetting schema 'public' on target database...[/bold yellow]")
         try:
-            conn = psycopg2.connect(db_url)
+            conn = connect_db(db_url)
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute("""

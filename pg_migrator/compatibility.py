@@ -1,4 +1,4 @@
-import psycopg2
+from .db import connect as connect_db
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -45,8 +45,8 @@ class CompatibilityAuditor:
     def audit_and_prepare(self, auto_enable_extensions: bool = True) -> bool:
         console.print("\n[bold cyan]🔍 AUDITING COMPATIBILITY & EXTENSIONS...[/bold cyan]")
         
-        prod_conn = psycopg2.connect(self.current_prod_url)
-        new_conn = psycopg2.connect(self.new_db_url)
+        prod_conn = connect_db(self.current_prod_url)
+        new_conn = connect_db(self.new_db_url)
         new_conn.autocommit = True
 
         prod_exts = self._get_extensions(prod_conn)

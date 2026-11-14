@@ -2,8 +2,8 @@ import os
 import sys
 import time
 import subprocess
-import psycopg2
 from pathlib import Path
+from .db import connect as connect_db
 from datetime import datetime
 from urllib.parse import urlparse
 from rich.console import Console
@@ -64,7 +64,7 @@ class DatabaseMigrator:
         
         # 1. Test Current Production Database
         try:
-            conn_prod = psycopg2.connect(self.current_production_db_url, connect_timeout=5)
+            conn_prod = connect_db(self.current_production_db_url, connect_timeout=5)
             cur_prod = conn_prod.cursor()
             cur_prod.execute("SELECT version();")
             prod_ver = cur_prod.fetchone()[0].split()[1]
@@ -84,7 +84,7 @@ class DatabaseMigrator:
 
         # 2. Test New Database
         try:
-            conn_new = psycopg2.connect(self.new_database_url, connect_timeout=5)
+            conn_new = connect_db(self.new_database_url, connect_timeout=5)
             cur_new = conn_new.cursor()
             cur_new.execute("SELECT version();")
             new_ver = cur_new.fetchone()[0].split()[1]

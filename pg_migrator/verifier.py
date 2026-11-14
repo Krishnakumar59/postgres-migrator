@@ -1,4 +1,4 @@
-import psycopg2
+from .db import connect as connect_db
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -108,8 +108,8 @@ class PostgresVerifier:
         console.print("\n[bold cyan]🔍 DEEP DATA INTEGRITY & ROW-LEVEL AUDIT...[/bold cyan]")
         console.print("  Comparing exact row counts, primary key boundaries, and cryptographic fingerprints...")
         
-        prod_conn = psycopg2.connect(self.current_prod_url)
-        new_conn = psycopg2.connect(self.new_db_url)
+        prod_conn = connect_db(self.current_prod_url)
+        new_conn = connect_db(self.new_db_url)
 
         prod_tables = self._get_tables(prod_conn)
         new_tables = self._get_tables(new_conn)

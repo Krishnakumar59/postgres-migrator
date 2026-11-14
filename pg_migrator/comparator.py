@@ -1,6 +1,6 @@
 import time
 import statistics
-import psycopg2
+from .db import connect as connect_db
 from rich.console import Console
 from rich.table import Table
 
@@ -23,13 +23,13 @@ class PerformanceComparator:
         conn_times = []
         for _ in range(8):
             t0 = time.perf_counter()
-            conn = psycopg2.connect(db_url)
+            conn = connect_db(db_url)
             t1 = time.perf_counter()
             conn_times.append((t1 - t0) * 1000)
             conn.close()
 
         # 2. Query RTT (SELECT 1)
-        conn = psycopg2.connect(db_url)
+        conn = connect_db(db_url)
         cur = conn.cursor()
         query_times = []
         for _ in range(n_samples):

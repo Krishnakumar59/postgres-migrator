@@ -1,5 +1,5 @@
-import psycopg2
 from urllib.parse import urlparse
+from .db import connect as connect_db
 from rich.console import Console
 from rich.panel import Panel
 
@@ -16,7 +16,7 @@ class PostgresCleaner:
 
     def get_database_summary(self) -> dict:
         """Inspects table counts, row counts, and database size."""
-        conn = psycopg2.connect(self.db_url)
+        conn = connect_db(self.db_url)
         cur = conn.cursor()
         
         cur.execute("""
@@ -80,7 +80,7 @@ class PostgresCleaner:
 
         # If target has 0 tables, reset schema cleanly for clean restoration
         try:
-            conn = psycopg2.connect(self.db_url)
+            conn = connect_db(self.db_url)
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute("DROP SCHEMA IF EXISTS public CASCADE;")
