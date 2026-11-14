@@ -22,7 +22,7 @@ def main():
 
     parser.add_argument(
         "--db", "-d",
-        default=os.getenv("CURRENT_PRODUCTION_DB_URL") or os.getenv("DB"),
+        default=os.getenv("CURRENT_PRODUCTION_DB_URL"),
         help="Database URL to rollback/restore onto (defaults to CURRENT_PRODUCTION_DB_URL)"
     )
 

@@ -9,7 +9,6 @@ from .cleaner import PostgresCleaner
 from .verifier import PostgresVerifier
 from .compatibility import CompatibilityAuditor
 from .comparator import PerformanceComparator
-from .env_switcher import EnvSwitcher
 from .sync import DeltaSyncEngine
 from .notifier import MigrationNotifier
 
@@ -24,13 +23,13 @@ def main():
     
     parser.add_argument(
         "--current-prod", "-p",
-        default=os.getenv("CURRENT_PRODUCTION_DB_URL") or os.getenv("CURRENT_PROD_DB_URL") or os.getenv("DB"),
+        default=os.getenv("CURRENT_PRODUCTION_DB_URL"),
         help="Current Production Database URL (Data will be READ from here)"
     )
     
     parser.add_argument(
         "--new-db", "-n",
-        default=os.getenv("NEW_DATABASE_URL") or os.getenv("NEW_DB_URL"),
+        default=os.getenv("NEW_DATABASE_URL"),
         help="New Empty Database URL (Data will be RESTORED here)"
     )
 
@@ -63,12 +62,6 @@ def main():
         "--compare-performance",
         action="store_true",
         help="Run side-by-side performance benchmark comparing Old vs New provider"
-    )
-
-    parser.add_argument(
-        "--switch-env",
-        action="store_true",
-        help="Automatically switch active .env to point to new database after verification"
     )
 
     parser.add_argument(
@@ -167,8 +160,7 @@ def main():
     # 9. Full End-to-End Enterprise Migration Pipeline
     res = migrator.run_full_migration(
         parallel_jobs=args.jobs,
-        compare_performance=True,
-        switch_env=args.switch_env
+        compare_performance=True
     )
     sys.exit(0 if res.get("success") else 1)
 

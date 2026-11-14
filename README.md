@@ -185,16 +185,6 @@ python migrate.py --compare-performance
 
 ---
 
-### 🔄 Automated `.env` Switcher
-
-Once verification passes with 100% accuracy, Postgres Migrator can automatically create a timestamped backup of your application's `.env` and safely rewrite database connection strings to point to the new destination.
-
-```bash
-python migrate.py --switch-env
-```
-
----
-
 ### 🚨 Disaster Recovery: 1-Click Rollback
 
 If you ever need to restore your database back to a pre-migration state:
@@ -272,7 +262,6 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 | `python migrate.py --sync-missing` | Runs fast Incremental Delta Catch-Up sync for newly created rows. |
 | `python migrate.py --audit-compatibility` | Audits version differences and extension availability between databases. |
 | `python migrate.py --compare-performance` | Runs side-by-side performance benchmarks (Old vs New provider). |
-| `python migrate.py --switch-env` | Runs full migration and updates local `.env` connection string on success. |
 | `python migrate.py --backup-both` | Takes binary snapshot dumps of **both** databases into `./backups/` only. |
 | `python migrate.py --verify-only` | Verifies data parity (row counts, sequences, MD5 fingerprints) only. |
 | `python migrate.py --test-notification` | Sends test alerts across Discord, Slack, Telegram, and Desktop notifications. |
@@ -302,7 +291,7 @@ Deep diagnostic and stress-testing tool for any PostgreSQL instance:
 - Generates high-resolution graphical visualizations and JSON reports.
 
 ```bash
-# Uses DB from .env (or set DB=postgres://...)
+# Uses CURRENT_PRODUCTION_DB_URL from .env
 python run_benchmark.py
 ```
 
@@ -335,7 +324,7 @@ Generated benchmark output artifacts:
      $ python migrate.py --verify-only
 
  [4] Switch Application Configuration & Go Live
-     $ python migrate.py --switch-env
+     - Set CURRENT_PRODUCTION_DB_URL in .env to the new database URL
      - Restart application services
      - Verify application traffic on new provider 🎉
 ```
@@ -354,8 +343,7 @@ from pg_migrator import (
     CompatibilityAuditor,
     PerformanceComparator,
     EmergencyRollback,
-    MigrationNotifier,
-    EnvSwitcher
+    MigrationNotifier
 )
 
 # 1. Dispatch custom notification alerts
@@ -380,7 +368,7 @@ migrator = DatabaseMigrator(
     new_database_url="postgres://user:pass@target-host:5432/db",
     backup_dir="./backups"
 )
-result = migrator.run_full_migration(parallel_jobs=4, switch_env=False)
+result = migrator.run_full_migration(parallel_jobs=4)
 
 # 4. Incremental Catch-Up Sync
 sync_engine = DeltaSyncEngine(

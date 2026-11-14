@@ -4,7 +4,6 @@ from .verifier import PostgresVerifier
 from .rollback import EmergencyRollback
 from .compatibility import CompatibilityAuditor
 from .comparator import PerformanceComparator
-from .env_switcher import EnvSwitcher
 from .notifier import MigrationNotifier
 from .sync import DeltaSyncEngine
 
@@ -15,7 +14,6 @@ __all__ = [
     "EmergencyRollback",
     "CompatibilityAuditor",
     "PerformanceComparator",
-    "EnvSwitcher",
     "MigrationNotifier",
     "DeltaSyncEngine"
 ]

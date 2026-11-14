@@ -14,7 +14,6 @@ from .cleaner import PostgresCleaner
 from .verifier import PostgresVerifier
 from .compatibility import CompatibilityAuditor
 from .comparator import PerformanceComparator
-from .env_switcher import EnvSwitcher
 from .notifier import MigrationNotifier
 from .sync import DeltaSyncEngine
 
@@ -261,7 +260,7 @@ class DatabaseMigrator:
         ))
         return True
 
-    def run_full_migration(self, parallel_jobs: int = 4, compare_performance: bool = True, switch_env: bool = False) -> dict:
+    def run_full_migration(self, parallel_jobs: int = 4, compare_performance: bool = True) -> dict:
         """Executes the complete safe migration pipeline with Smart-Sync detection."""
         console.print(Panel.fit(
             "[bold white]POSTGRESQL ENTERPRISE MIGRATION PIPELINE[/bold white]\n"
@@ -299,8 +298,6 @@ class DatabaseMigrator:
                 ))
                 if compare_performance:
                     PerformanceComparator(self.current_production_db_url, self.new_database_url).compare()
-                if switch_env:
-                    EnvSwitcher().switch_env(self.new_database_url)
                 return {"success": True, "already_synced": True, "audit": audit}
 
             # If not 100% synced, offer/run Delta Sync automatically
@@ -321,8 +318,6 @@ class DatabaseMigrator:
                 ))
                 if compare_performance:
                     PerformanceComparator(self.current_production_db_url, self.new_database_url).compare()
-                if switch_env:
-                    EnvSwitcher().switch_env(self.new_database_url)
                 return {"success": True, "delta_synced": True, "audit": re_audit}
 
         # 3. Extension & Compatibility Audit
@@ -362,19 +357,15 @@ class DatabaseMigrator:
             comparator = PerformanceComparator(self.current_production_db_url, self.new_database_url)
             comparator.compare()
 
-        # 9. STEP 6: OPTIONAL ENV SWITCH
-        if switch_env and audit_result["success"]:
-            EnvSwitcher().switch_env(self.new_database_url)
-        elif audit_result["success"]:
-            EnvSwitcher().generate_production_env(self.new_database_url)
-
-        # 10. SUMMARY & NOTIFICATION
+        # 9. SUMMARY & NOTIFICATION
         if audit_result["success"]:
             console.print(Panel(
                 f"[bold green]✅ INITIAL MIGRATION SUCCESSFUL & 100% VERIFIED[/bold green]\n\n"
                 f"• Dual verified backups saved in [cyan]./backups/[/cyan]\n"
                 f"• All {audit_result['total_tables']} tables copied and verified.\n"
                 f"• {audit_result['total_target_rows']:,} rows transferred with zero errors.\n"
+                f"• Cutover: set [cyan]CURRENT_PRODUCTION_DB_URL[/cyan] in .env to "
+                f"[cyan]{self._sanitize_url(self.new_database_url)}[/cyan].\n"
                 f"• Ready for production cutover.",
                 title="Cutover Ready",
                 border_style="green"
